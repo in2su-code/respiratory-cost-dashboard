@@ -4,39 +4,57 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>호흡기 진료비 편차 대시보드</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css">
 <style>
+  /* Montage (wanteddev/montage-web, @montage-ui/theme) 시맨틱 토큰을 옮긴 값 */
   :root {
-    --bg: #f7f7f5; --card: #ffffff; --ink: #1c1c1a; --muted: #6b6b66; --line: #dcdcd6;
-    --main: #2a6f97; --main-soft: #a9c6d8; --p90: #c8553d; --hot: 200, 85, 61; --cool: 42, 111, 151;
+    --bg: #F7F7F8;                       /* background.neutral.secondary */
+    --card: #FFFFFF;                     /* surface.elevated.primary */
+    --ink: #171719;                      /* foreground.neutral.primary */
+    --muted: rgba(55, 56, 60, 0.61);     /* foreground.neutral.tertiary */
+    --line: rgba(112, 115, 124, 0.22);   /* line.neutral.primary */
+    --field: rgba(112, 115, 124, 0.08);  /* surface.neutral.secondary */
+    --main: #0066FF;                     /* foreground.brand.primary */
+    --main-soft: #C9DEFE;                /* blue 90 */
+    --p90: #E52222;                      /* foreground.negative.strong */
+    --hot: 255, 66, 66; --cool: 0, 102, 255;
+    --r-card: 12px; --r-field: 8px;      /* radius 12 / 8 */
+    --font: Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", system-ui, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #151514; --card: #1f1f1d; --ink: #ecece8; --muted: #9a9a93; --line: #3a3a36;
-      --main: #6fb1d6; --main-soft: #3c5a6b; --p90: #ee8a73; --hot: 238, 138, 115; --cool: 111, 177, 214;
+      --bg: #0F0F10; --card: #1B1C1E; --ink: #F7F7F8;
+      --muted: rgba(174, 176, 182, 0.61); --line: rgba(112, 115, 124, 0.22); --field: rgba(112, 115, 124, 0.22);
+      --main: #3385FF; --main-soft: rgba(51, 133, 255, 0.28); --p90: #FF6363;
+      --hot: 255, 99, 99; --cool: 51, 133, 255; color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #151514; --card: #1f1f1d; --ink: #ecece8; --muted: #9a9a93; --line: #3a3a36;
-    --main: #6fb1d6; --main-soft: #3c5a6b; --p90: #ee8a73; --hot: 238, 138, 115; --cool: 111, 177, 214;
+    --bg: #0F0F10; --card: #1B1C1E; --ink: #F7F7F8;
+    --muted: rgba(174, 176, 182, 0.61); --line: rgba(112, 115, 124, 0.22); --field: rgba(112, 115, 124, 0.22);
+    --main: #3385FF; --main-soft: rgba(51, 133, 255, 0.28); --p90: #FF6363;
+    --hot: 255, 99, 99; --cool: 51, 133, 255; color-scheme: dark;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 400 0.9375rem/1.375rem var(--font); letter-spacing: 0.0096em; }  /* body2 */
   main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  h2 { font-size: 16px; margin: 0 0 4px; }
-  .sub { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
-  section, .filters { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 16px 0; }
+  h1 { font-size: 1.5rem; line-height: 2rem; font-weight: 700; letter-spacing: -0.023em; margin: 0 0 4px; }  /* title3 */
+  h2 { font-size: 1.125rem; line-height: 1.625rem; font-weight: 600; letter-spacing: -0.002em; margin: 0 0 4px; }  /* headline1 */
+  .sub { color: var(--muted); font-size: 0.8125rem; line-height: 1.125rem; margin: 0 0 12px; }
+  section, .filters { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 20px; margin: 16px 0; }
   .filters { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: end; }
   .filters label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
-  .filters select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .filters select { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: var(--r-field); padding: 7px 10px; }
+  select:focus-visible, input:focus-visible { outline: 2px solid var(--main); outline-offset: 1px; }
   .filters label.chk { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
-  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 14px 16px; }
   .kpi .l { font-size: 12px; color: var(--muted); }
-  .kpi .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kpi .v { font-size: 1.375rem; line-height: 1.875rem; font-weight: 600; letter-spacing: -0.0194em; font-variant-numeric: tabular-nums; }
   .kpi .n { font-size: 11px; color: var(--muted); }
   svg { width: 100%; height: auto; display: block; }
-  svg text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+  svg text { fill: var(--muted); font-size: 11px; font-family: var(--font); }
   svg text.strong { fill: var(--ink); }
   svg .axis { stroke: var(--line); }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
