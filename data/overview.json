@@ -1,0 +1,12 @@
+{
+ "claim": 38375,
+ "patient": 3000,
+ "institution": 2184,
+ "sick_master": 21299,
+ "code_table": 215,
+ "sido_code": 17,
+ "hospital_open": 4215,
+ "claim_sick": 39892,
+ "claim_rx": 60146,
+ "drug_ingredient": 20114
+}
