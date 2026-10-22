@@ -85,7 +85,7 @@
 
   <div class="kpis" id="kpis"></div>
 
-  <section data-metric="resp_claims" id="monthly_trend">
+  <section id="monthly_trend">
     <h2>월별 추이</h2>
     <p class="sub">필터(기간·상병·종별)가 적용됩니다. 월 표본이 5건 미만이면 선을 끊습니다.</p>
     <div class="grid2">
@@ -94,19 +94,19 @@
     </div>
   </section>
 
-  <section data-metric="resp_claims" id="cost_by_class">
+  <section id="cost_by_class">
     <h2>종별 건당 진료비 분포</h2>
     <p class="sub">상자 = P25~P75, 굵은 선 = 중앙값, 선 끝 = P90. 기간·상병 필터가 적용되고 종별 필터는 적용되지 않습니다.</p>
     <div id="chart-box"></div>
   </section>
 
-  <section data-metric="resp_claims" id="cost_by_class_sick">
+  <section id="cost_by_class_sick">
     <h2>같은 상병끼리 비교 (상병 × 종별 중앙값)</h2>
     <p class="sub">같은 상병 안에서 종별 중앙값이 그 상병 전체 중앙값의 몇 배인지 색으로 표시합니다. 붉을수록 높고 푸를수록 낮습니다. 상병 이름을 누르면 상병 필터가 바뀝니다.</p>
     <div class="scroll" id="tbl-sick"></div>
   </section>
 
-  <section data-metric="resp_claims" id="sick_mix">
+  <section id="sick_mix">
     <h2>상병별 건수와 비중</h2>
     <p class="sub">기간·종별 필터가 적용됩니다 (상병 필터는 적용되지 않음).</p>
     <div id="chart-mix"></div>
@@ -116,80 +116,78 @@
 </main>
 
 <script>
+// Supabase 연결 (anon/publishable 키는 공개되어도 된다. 원본 테이블은 RLS 로 막혀 있고 집계 함수만 호출할 수 있다)
+const SUPABASE_URL = "https://tsiljnfuexmdswxfivvg.supabase.co";
+const SUPABASE_KEY = "sb_publishable_4s2njWuWPLD8OvFNwzQ0XA_YomulcTo";
+
 const MIN_N = 30;       // 이보다 적으면 분포를 그리지 않는다
 const MIN_MONTH_N = 5;  // 월별 선 그래프의 최소 표본
 const won = (v) => Math.round(v).toLocaleString("ko-KR") + "원";
 const $ = (id) => document.getElementById(id);
 
-// 선형 보간 백분위수 (numpy 기본과 동일)
-function pct(sorted, p) {
-  if (!sorted.length) return NaN;
-  const pos = (sorted.length - 1) * p, lo = Math.floor(pos), hi = Math.ceil(pos);
-  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+async function rpc(name, args = {}) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  if (!r.ok) throw new Error(`${name} ${r.status}`);
+  return r.json();
 }
-const stats = (vals) => {
-  const s = vals.slice().sort((a, b) => a - b);
-  return { n: s.length, sum: s.reduce((x, y) => x + y, 0), p25: pct(s, .25), p50: pct(s, .5), p75: pct(s, .75), p90: pct(s, .9) };
-};
 
-let D, state;
+let META, state, seq = 0;
 
-fetch("data/resp_claims.json").then((r) => r.json()).then((d) => { D = d; init(); }).catch(() => {
-  $("meta").textContent = "data/resp_claims.json 을 읽지 못했습니다. python3 build.py 를 실행하고 python3 -m http.server 로 여세요.";
-});
+(async function boot() {
+  try { META = await rpc("resp_meta"); init(); }
+  catch (e) { $("meta").textContent = "Supabase 에서 데이터를 불러오지 못했습니다. 잠시 후 다시 시도하세요. (" + e.message + ")"; }
+})();
 
 function init() {
-  const { months, sicks, classes } = D.dims;
+  const { months, sicks, classes } = META;
   const opt = (sel, items) => { $(sel).innerHTML = items.map(([v, t]) => `<option value="${v}">${t}</option>`).join(""); };
-  opt("f-from", months.map((m, i) => [i, m]));
-  opt("f-to", months.map((m, i) => [i, m]));
-  opt("f-sick", [[-1, "전체 호흡기"], ...sicks.map((s, i) => [i, `${s.cd} ${s.nm}`])]);
-  opt("f-cls", [[-1, "전체 종별"], ...classes.map((c, i) => [i, c.nm])]);
-  state = { from: 0, to: months.length - 1, sick: -1, cls: -1, inp: false };
+  opt("f-from", months.map((m) => [m, m]));
+  opt("f-to", months.map((m) => [m, m]));
+  opt("f-sick", [["", "전체 호흡기"], ...sicks.map((s) => [s.cd, `${s.cd} ${s.nm}`])]);
+  opt("f-cls", [["", "전체 종별"], ...classes.map((c) => [c.cd, c.nm])]);
+  state = { from: months[0], to: months[months.length - 1], sick: "", cls: "", inp: false };
   $("f-to").value = state.to;
   for (const [id, key] of [["f-from", "from"], ["f-to", "to"], ["f-sick", "sick"], ["f-cls", "cls"]]) {
-    $(id).onchange = (e) => { state[key] = +e.target.value; render(); };
+    $(id).onchange = (e) => { state[key] = e.target.value; render(); };
   }
   $("f-inp").onchange = (e) => { state.inp = e.target.checked; render(); };
   render();
 }
 
-// 필터를 적용한 행 인덱스. ignore 에 적은 필터는 건너뛴다.
-function pick(ignore = []) {
-  const out = [];
-  for (let i = 0; i < D.a.length; i++) {
-    if (D.m[i] < state.from || D.m[i] > state.to) continue;
-    if (!state.inp && D.f[i]) continue;
-    if (!ignore.includes("sick") && state.sick >= 0 && D.s[i] !== state.sick) continue;
-    if (!ignore.includes("cls") && state.cls >= 0 && D.c[i] !== state.cls) continue;
-    out.push(i);
-  }
-  return out;
-}
-const amts = (idx) => idx.map((i) => D.a[i]);
-
-function render() {
+async function render() {
   if (state.from > state.to) { $("meta").textContent = "기간 시작이 끝보다 늦습니다."; return; }
-  const { months } = D.dims;
-  const all = pick();
-  $("meta").textContent = `${months[state.from]} ~ ${months[state.to]} · 호흡기 명세서 ${all.length.toLocaleString()}건 · ${state.inp ? "외래+입원" : "외래만"}`;
-  renderKpis(all); renderTrend(all); renderBox(); renderSickTable(); renderMix();
+  const me = ++seq;  // 필터를 빠르게 바꿀 때 늦게 도착한 옛 응답은 버린다
+  $("meta").textContent = "불러오는 중…";
+  const base = { p_from: state.from, p_to: state.to, p_inp: state.inp };
+  const sick = state.sick || null, cls = state.cls || null;
+  try {
+    const [kpi, monthly, byClass, sickClass, mix] = await Promise.all([
+      rpc("resp_kpi", { ...base, p_sick: sick, p_cls: cls }),
+      rpc("resp_monthly", { ...base, p_sick: sick, p_cls: cls }),
+      rpc("resp_by_class", { ...base, p_sick: sick }),
+      rpc("resp_sick_class", base),
+      rpc("resp_sick_mix", { ...base, p_cls: cls }),
+    ]);
+    if (me !== seq) return;
+    $("meta").textContent = `${state.from} ~ ${state.to} · 호흡기 명세서 ${kpi.n.toLocaleString()}건 · ${state.inp ? "외래+입원" : "외래만"}`;
+    renderKpis(kpi); renderTrend(monthly); renderBox(byClass); renderSickTable(sickClass); renderMix(mix);
+  } catch (e) {
+    if (me === seq) $("meta").textContent = "데이터를 불러오지 못했습니다. (" + e.message + ")";
+  }
 }
 
-function renderKpis(idx) {
-  const s = stats(amts(idx));
-  const base = pick(["cls"]);
-  const meds = D.dims.classes.map((_, ci) => {
-    const st = stats(amts(base.filter((i) => D.c[i] === ci)));
-    return st.n >= MIN_N ? st.p50 : null;
-  }).filter((v) => v != null);
-  const ratio = meds.length >= 2 ? (Math.max(...meds) / Math.min(...meds)).toFixed(2) + "배" : "—";
+function renderKpis(k) {
+  const ratio = k.class_ratio != null ? k.class_ratio.toFixed(2) + "배" : "—";
   const cards = [
-    ["명세서 수", s.n.toLocaleString() + "건", ""],
-    ["총진료비", won(s.sum), ""],
-    ["건당 평균", s.n ? won(s.sum / s.n) : "—", "이상치 영향을 받음"],
-    ["건당 중앙값", s.n ? won(s.p50) : "—", ""],
-    ["건당 P90", s.n ? won(s.p90) : "—", "상위 10% 경계"],
+    ["명세서 수", k.n.toLocaleString() + "건", ""],
+    ["총진료비", won(k.sum), ""],
+    ["건당 평균", k.n ? won(k.sum / k.n) : "—", "이상치 영향을 받음"],
+    ["건당 중앙값", k.n ? won(k.p50) : "—", ""],
+    ["건당 P90", k.n ? won(k.p90) : "—", "상위 10% 경계"],
     ["종별 중앙값 격차", ratio, `최고/최저, 종별 n≥${MIN_N}`],
   ];
   $("kpis").innerHTML = cards.map(([l, v, n]) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join("");
@@ -199,54 +197,54 @@ function renderKpis(idx) {
 const W = 520, H = 220, M = { l: 52, r: 12, t: 12, b: 28 };
 const niceMax = (v) => { const e = 10 ** Math.floor(Math.log10(v || 1)); return Math.ceil(v / e) * e || 1; };
 
-function renderTrend(idx) {
-  const n = D.dims.months.length, from = state.from, to = state.to, span = to - from + 1;
-  const byM = Array.from({ length: n }, () => []);
-  idx.forEach((i) => byM[D.m[i]].push(D.a[i]));
-  const x = (m) => M.l + (m - from + .5) * (W - M.l - M.r) / span;
+function renderTrend(rows) {
+  const all = META.months, from = all.indexOf(state.from), to = all.indexOf(state.to), span = to - from + 1;
+  const months = Array.from({ length: span }, (_, k) => all[from + k]);
+  const by = Object.fromEntries(rows.map((r) => [r.month, r]));
+  const cnt = (m) => (by[m] ? by[m].n : 0);
+  const x = (k) => M.l + (k + .5) * (W - M.l - M.r) / span;
   const bw = Math.max(2, (W - M.l - M.r) / span * .7);
-  const ticks = (months) => months.map((m, k) => (k % Math.ceil(span / 6) === 0)
-    ? `<text x="${x(from + k)}" y="${H - 8}" text-anchor="middle">${D.dims.months[from + k].slice(2)}</text>` : "").join("");
-  const months = Array.from({ length: span }, (_, k) => from + k);
+  const ticks = months.map((m, k) => (k % Math.ceil(span / 6) === 0)
+    ? `<text x="${x(k)}" y="${H - 8}" text-anchor="middle">${m.slice(2)}</text>` : "").join("");
 
-  const cmax = niceMax(Math.max(...months.map((m) => byM[m].length), 1));
+  const cmax = niceMax(Math.max(...months.map(cnt), 1));
   const y1 = (v) => H - M.b - v / cmax * (H - M.t - M.b);
   let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="월별 명세서 수">`;
   for (const t of [0, .5, 1]) svg += `<line class="axis" x1="${M.l}" x2="${W - M.r}" y1="${y1(cmax * t)}" y2="${y1(cmax * t)}"/><text x="${M.l - 6}" y="${y1(cmax * t) + 4}" text-anchor="end">${Math.round(cmax * t).toLocaleString()}</text>`;
-  svg += months.map((m) => `<rect x="${x(m) - bw / 2}" y="${y1(byM[m].length)}" width="${bw}" height="${H - M.b - y1(byM[m].length)}" fill="var(--main-soft)"><title>${D.dims.months[m]}: ${byM[m].length}건</title></rect>`).join("");
-  $("chart-count").innerHTML = svg + ticks(months) + "</svg>";
+  svg += months.map((m, k) => `<rect x="${x(k) - bw / 2}" y="${y1(cnt(m))}" width="${bw}" height="${H - M.b - y1(cnt(m))}" fill="var(--main-soft)"><title>${m}: ${cnt(m)}건</title></rect>`).join("");
+  $("chart-count").innerHTML = svg + ticks + "</svg>";
 
-  const st = months.map((m) => byM[m].length >= MIN_MONTH_N ? stats(byM[m]) : null);
+  const st = months.map((m) => (by[m] && by[m].n >= MIN_MONTH_N ? by[m] : null));
   const vmax = niceMax(Math.max(...st.filter(Boolean).map((s) => s.p90), 1));
   const y2 = (v) => H - M.b - v / vmax * (H - M.t - M.b);
   svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="월별 건당 진료비 중앙값과 P90">`;
   for (const t of [0, .5, 1]) svg += `<line class="axis" x1="${M.l}" x2="${W - M.r}" y1="${y2(vmax * t)}" y2="${y2(vmax * t)}"/><text x="${M.l - 6}" y="${y2(vmax * t) + 4}" text-anchor="end">${Math.round(vmax * t / 1000)}천</text>`;
   const line = (key, color) => {
     let d = "", pen = false;
-    st.forEach((s, k) => { if (!s) { pen = false; return; } d += `${pen ? "L" : "M"}${x(months[k])},${y2(s[key])}`; pen = true; });
+    st.forEach((s, k) => { if (!s) { pen = false; return; } d += `${pen ? "L" : "M"}${x(k)},${y2(s[key])}`; pen = true; });
     return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2"/>`;
   };
   svg += line("p50", "var(--main)") + line("p90", "var(--p90)");
   const last = [...st].reverse().findIndex(Boolean);
   if (last >= 0) {
     const k = st.length - 1 - last;
-    svg += `<text class="strong" x="${x(months[k]) - 4}" y="${y2(st[k].p90) - 6}" text-anchor="end" style="fill:var(--p90)">P90 ${Math.round(st[k].p90).toLocaleString()}</text>`;
-    svg += `<text class="strong" x="${x(months[k]) - 4}" y="${y2(st[k].p50) + 14}" text-anchor="end" style="fill:var(--main)">P50 ${Math.round(st[k].p50).toLocaleString()}</text>`;
+    svg += `<text class="strong" x="${x(k) - 4}" y="${y2(st[k].p90) - 6}" text-anchor="end" style="fill:var(--p90)">P90 ${Math.round(st[k].p90).toLocaleString()}</text>`;
+    svg += `<text class="strong" x="${x(k) - 4}" y="${y2(st[k].p50) + 14}" text-anchor="end" style="fill:var(--main)">P50 ${Math.round(st[k].p50).toLocaleString()}</text>`;
   }
-  $("chart-line").innerHTML = svg + ticks(months) + "</svg>";
+  $("chart-line").innerHTML = svg + ticks + "</svg>";
 }
 
-function renderBox() {
-  const base = pick(["cls"]);
-  const rows = D.dims.classes.map((c, ci) => ({ nm: c.nm, st: stats(amts(base.filter((i) => D.c[i] === ci))) }));
-  const vmax = niceMax(Math.max(...rows.filter((r) => r.st.n >= MIN_N).map((r) => r.st.p90), 1));
+function renderBox(data) {
+  const by = Object.fromEntries(data.map((r) => [r.cd, r]));
+  const rows = META.classes.map((c) => by[c.cd] || { cd: c.cd, nm: c.nm, n: 0 });
+  const vmax = niceMax(Math.max(...rows.filter((r) => r.n >= MIN_N).map((r) => r.p90), 1));
   const L = 100, R = 200, rh = 44, h = rows.length * rh + 32;
   const x = (v) => L + v / vmax * (W - L - R);
   let svg = `<svg viewBox="0 0 ${W} ${h}" role="img" aria-label="종별 건당 진료비 분포">`;
   for (const t of [0, .25, .5, .75, 1]) svg += `<line class="axis" x1="${x(vmax * t)}" x2="${x(vmax * t)}" y1="6" y2="${h - 24}"/><text x="${x(vmax * t)}" y="${h - 8}" text-anchor="middle">${Math.round(vmax * t / 1000)}천</text>`;
-  rows.forEach((r, k) => {
-    const cy = 10 + k * rh + rh / 2 - 4, s = r.st;
-    svg += `<text class="strong" x="${L - 8}" y="${cy + 4}" text-anchor="end">${r.nm}</text>`;
+  rows.forEach((s, k) => {
+    const cy = 10 + k * rh + rh / 2 - 4;
+    svg += `<text class="strong" x="${L - 8}" y="${cy + 4}" text-anchor="end">${s.nm}</text>`;
     if (s.n < MIN_N) { svg += `<text x="${L + 4}" y="${cy + 4}">표본 부족 (n=${s.n})</text>`; return; }
     svg += `<line x1="${x(s.p75)}" x2="${x(s.p90)}" y1="${cy}" y2="${cy}" stroke="var(--main)" stroke-width="2"/>`;
     svg += `<line x1="${x(s.p90)}" x2="${x(s.p90)}" y1="${cy - 6}" y2="${cy + 6}" stroke="var(--main)" stroke-width="2"/>`;
@@ -257,46 +255,35 @@ function renderBox() {
   $("chart-box").innerHTML = svg + "</svg>";
 }
 
-function renderSickTable() {
-  const base = pick(["sick", "cls"]);
-  const cnt = {};
-  base.forEach((i) => { cnt[D.s[i]] = (cnt[D.s[i]] || 0) + 1; });
-  const top = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([s]) => +s);
-  const cls = D.dims.classes;
+function renderSickTable(data) {
+  const cls = META.classes;
   let html = `<table><thead><tr><th>상병</th><th>전체 중앙값</th>${cls.map((c) => `<th>${c.nm}</th>`).join("")}</tr></thead><tbody>`;
-  for (const s of top) {
-    const rows = base.filter((i) => D.s[i] === s);
-    const all = stats(amts(rows));
-    const sk = D.dims.sicks[s];
-    html += `<tr><td class="sick" data-s="${s}">${sk.cd} ${sk.nm}</td><td>${won(all.p50)}<small>n=${all.n.toLocaleString()}</small></td>`;
-    for (let ci = 0; ci < cls.length; ci++) {
-      const st = stats(amts(rows.filter((i) => D.c[i] === ci)));
+  for (const r of data) {
+    const by = Object.fromEntries((r.by_class || []).map((c) => [c.cd, c]));
+    html += `<tr><td class="sick" data-s="${r.sick}">${r.sick} ${r.nm}</td><td>${won(r.p50)}<small>n=${r.n.toLocaleString()}</small></td>`;
+    for (const c of cls) {
+      const st = by[c.cd] || { n: 0 };
       if (st.n < MIN_N) { html += `<td class="na">표본 부족<small>n=${st.n}</small></td>`; continue; }
-      const r = st.p50 / all.p50, a = Math.min(.55, Math.abs(r - 1) * 1.2);
-      const rgb = r >= 1 ? "var(--hot)" : "var(--cool)";
-      html += `<td style="background:rgba(${rgb},${a.toFixed(2)})">${won(st.p50)}<small>${r.toFixed(2)}배 · n=${st.n.toLocaleString()}</small></td>`;
+      const ratio = st.p50 / r.p50, a = Math.min(.55, Math.abs(ratio - 1) * 1.2);
+      const rgb = ratio >= 1 ? "var(--hot)" : "var(--cool)";
+      html += `<td style="background:rgba(${rgb},${a.toFixed(2)})">${won(st.p50)}<small>${ratio.toFixed(2)}배 · n=${st.n.toLocaleString()}</small></td>`;
     }
     html += "</tr>";
   }
   $("tbl-sick").innerHTML = html + "</tbody></table>";
   $("tbl-sick").querySelectorAll("td.sick").forEach((td) => {
-    td.onclick = () => { state.sick = +td.dataset.s; $("f-sick").value = state.sick; render(); };
+    td.onclick = () => { state.sick = td.dataset.s; $("f-sick").value = state.sick; render(); };
   });
 }
 
-function renderMix() {
-  const base = pick(["sick"]);
-  const cnt = {};
-  base.forEach((i) => { cnt[D.s[i]] = (cnt[D.s[i]] || 0) + 1; });
-  const items = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 12);
-  const total = base.length || 1, max = items.length ? items[0][1] : 1;
+function renderMix(d) {
+  const items = d.items, total = d.total || 1, max = items.length ? items[0].n : 1;
   const L = 230, R = 90, rh = 24, h = items.length * rh + 8;
   let svg = `<svg viewBox="0 0 ${W + 100} ${h}" role="img" aria-label="상병별 건수">`;
-  items.forEach(([s, n], k) => {
-    const y = 4 + k * rh, sk = D.dims.sicks[+s], bw = n / max * (W + 100 - L - R);
-    const nm = `${sk.cd} ${sk.nm}`.slice(0, 22);
-    svg += `<text class="strong" x="${L - 8}" y="${y + 15}" text-anchor="end">${nm}</text><rect x="${L}" y="${y + 3}" width="${bw}" height="16" fill="var(--main-soft)"/>`;
-    svg += `<text x="${L + bw + 6}" y="${y + 15}">${n.toLocaleString()}건 (${(n / total * 100).toFixed(1)}%)</text>`;
+  items.forEach((it, k) => {
+    const y = 4 + k * rh, bw = it.n / max * (W + 100 - L - R);
+    svg += `<text class="strong" x="${L - 8}" y="${y + 15}" text-anchor="end">${`${it.sick} ${it.nm}`.slice(0, 22)}</text><rect x="${L}" y="${y + 3}" width="${bw}" height="16" fill="var(--main-soft)"/>`;
+    svg += `<text x="${L + bw + 6}" y="${y + 15}">${it.n.toLocaleString()}건 (${(it.n / total * 100).toFixed(1)}%)</text>`;
   });
   $("chart-mix").innerHTML = svg + "</svg>";
 }

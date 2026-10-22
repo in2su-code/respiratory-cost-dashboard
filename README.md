@@ -38,28 +38,30 @@ cd respiratory-cost-dashboard
 python3 -m http.server
 ```
 
-브라우저에서 http://localhost:8000/ 을 엽니다. 집계 데이터(`data/resp_claims.json`)가 저장소에 들어 있어 바로 보입니다.
+브라우저에서 http://localhost:8000/ 을 엽니다. 데이터는 Supabase(클라우드 DB)에서 가져오므로 인터넷 연결이 필요하고, 별도 설정 없이 바로 보입니다.
 
 ## 데이터 갱신 (월 1회)
 
-원본 구글 시트가 갱신되면 아래를 실행합니다. 시트는 "링크가 있는 모든 사용자"가 볼 수 있어야 합니다.
+원본 구글 시트가 갱신되면 시트를 다시 내려받아 Supabase에 올립니다. 시트는 "링크가 있는 모든 사용자"가 볼 수 있어야 하고, 터미널에서 `supabase login`과 프로젝트 연결(`supabase link`)이 되어 있어야 합니다.
 
 ```bash
 python3 build.py --refresh
 ```
 
 ```bash
-git add -A && git commit -m "데이터 갱신" && git push
+python3 supabase/load_data.py
 ```
 
-push 후 1~2분 뒤 배포 사이트에 반영됩니다. 원본 CSV는 `.gitignore`로 제외되어 올라가지 않습니다.
+화면은 DB를 직접 읽으므로 **GitHub에 push할 필요가 없습니다.** 올리는 즉시 배포 사이트에 반영됩니다. 원본 CSV는 `.gitignore`로 제외되어 올라가지 않습니다.
 
 ## 폴더 구조
 
 ```
-build.py              시트 다운로드 → 집계 → data/*.json
-index.html            대시보드 (HTML+CSS+JS 한 파일, 차트는 직접 그린 SVG)
-data/                 resp_claims.json(화면이 읽는 집계), overview.json, CSV(git 제외)
+index.html            대시보드 (HTML+CSS+JS 한 파일, 차트는 직접 그린 SVG, Supabase 함수 호출)
+supabase/migrations/  테이블, 읽기 차단(RLS), 집계 함수(SQL)
+supabase/load_data.py CSV → Supabase 적재 (DB 비밀번호 없이 CLI 로그인만 필요)
+build.py              시트 → data/*.csv 다운로드
+data/                 CSV(git 제외), 이전 JSON 방식의 결과물(resp_claims.json, 현재는 화면이 읽지 않음)
 docs/requirements.md  요구사항 (인터뷰 결과)
 docs/reproduce.md     처음부터 같은 결과를 만드는 프롬프트와 절차
 docs/data_dictionary.md, docs/data_profile.md   데이터 설명
@@ -75,12 +77,18 @@ mkdir -p ~/.claude/skills && cp -R skill/dashboard-scaffold ~/.claude/skills/
 python3 ~/.claude/skills/dashboard-scaffold/scripts/scaffold.py ./my-dashboard --sheet-url "<시트 URL>" --title "<제목>"
 ```
 
-## 지표 목록
+## 데이터 구조 (Supabase)
 
-| 이름 | 정의 | 데이터 |
-|---|---|---|
-| overview | 탭별 행 수 (파이프라인 점검용) | 전체 |
-| resp_claims | 호흡기(J) 명세서 한 줄씩(월·상병·종별·입원여부·총진료비). 화면의 5개 섹션이 이 JSON 하나를 읽어 브라우저에서 필터·집계 | claim, institution, sick_master, code_table |
+원본 행은 브라우저가 읽을 수 없게 막혀 있고(RLS), 화면은 아래 집계 함수만 호출합니다. 필터를 바꿀 때마다 호출합니다.
+
+| 함수 | 용도 |
+|---|---|
+| `resp_meta` | 필터 목록(월, 상병, 종별) |
+| `resp_kpi` | KPI 카드 6개 |
+| `resp_monthly` | 월별 명세서 수와 P50·P90 |
+| `resp_by_class` | 종별 P25·P50·P75·P90 |
+| `resp_sick_class` | 상위 10개 상병 × 종별 중앙값 |
+| `resp_sick_mix` | 상병별 건수와 비중 |
 
 ## 디자인 시스템
 
@@ -90,6 +98,7 @@ python3 ~/.claude/skills/dashboard-scaffold/scripts/scaffold.py ./my-dashboard -
 
 - 기관명이 없어 개별 병원은 비교하지 못하고 종별 비교만 합니다.
 - 환자 3,000명 규모 표본이며, 법정감염병 급수가 붙은 호흡기 상병은 인플루엔자(J101)뿐이라 감염병만 따로 깊게 보기는 어렵습니다.
+- 집계 결과는 누구나 조회할 수 있습니다(anon 키가 화면 코드에 들어 있음). 무료 Supabase는 접속이 없으면 일시 정지되어 화면이 비어 보일 수 있습니다.
 - 공개 배포용입니다. 실제 식약처·심평원 데이터에는 공개 저장소와 Pages를 쓰면 안 됩니다.
 
 ## 성장 규칙
